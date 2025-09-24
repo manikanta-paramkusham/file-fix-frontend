@@ -4,10 +4,25 @@ import { Card } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Upload, Video, Play, Pause, Volume2, VolumeX } from 'lucide-react';
 
+interface DetectedObject {
+  id: string;
+  type: 'car' | 'bike' | 'pedestrian' | 'traffic_light' | 'zebra_crossing' | 'bus' | 'truck' | 'motorcycle';
+  confidence: number;
+  bbox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  position: string;
+}
+
 interface ProcessingResult {
   processed_video_url: string;
   audio_feedback_url: string;
   description_text: string;
+  detected_objects: DetectedObject[];
+  confidence_score: number;
 }
 
 const VisionMate = () => {
@@ -20,6 +35,8 @@ const VisionMate = () => {
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [audioMuted, setAudioMuted] = useState(false);
+  const [detectedObjects, setDetectedObjects] = useState<DetectedObject[]>([]);
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -38,45 +55,125 @@ const VisionMate = () => {
     }
   };
 
-  const simulateProcessing = useCallback(async (file: File): Promise<ProcessingResult> => {
-    // Simulate video processing delay
+  const simulateAdvancedDetection = useCallback(async (file: File): Promise<ProcessingResult> => {
+    // Simulate video processing delay with progress
     await new Promise(resolve => setTimeout(resolve, 3000));
     
     // Create object URL for the uploaded video
     const videoUrl = URL.createObjectURL(file);
     
-    // Simulate zebra crossing detection results
-    const detectionResults = [
-      "1 zebra crossing detected at intersection",
-      "2 zebra crossings found - safe to cross",
-      "Clear zebra crossing ahead - proceed with caution",
-      "Multiple crossings detected in area",
-      "Zebra crossing partially visible - check for traffic"
-    ];
+    // Simulate realistic object detection with various objects
+    const objectTypes: DetectedObject['type'][] = ['car', 'bike', 'pedestrian', 'traffic_light', 'zebra_crossing', 'bus', 'truck', 'motorcycle'];
+    const positions = ['left side', 'right side', 'center', 'far left', 'far right', 'approaching', 'distant'];
     
-    const randomResult = detectionResults[Math.floor(Math.random() * detectionResults.length)];
+    // Generate realistic detected objects
+    const numObjects = Math.floor(Math.random() * 5) + 2; // 2-6 objects
+    const detectedObjects: DetectedObject[] = [];
     
-    // Create a simple audio feedback (using text-to-speech simulation)
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
+    for (let i = 0; i < numObjects; i++) {
+      const objectType = objectTypes[Math.floor(Math.random() * objectTypes.length)];
+      const confidence = Math.random() * 0.3 + 0.7; // 70-100% confidence
+      const position = positions[Math.floor(Math.random() * positions.length)];
+      
+      detectedObjects.push({
+        id: `obj_${i}`,
+        type: objectType,
+        confidence: Math.round(confidence * 100) / 100,
+        bbox: {
+          x: Math.floor(Math.random() * 400),
+          y: Math.floor(Math.random() * 300),
+          width: Math.floor(Math.random() * 100) + 50,
+          height: Math.floor(Math.random() * 80) + 40,
+        },
+        position
+      });
+    }
     
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
+    // Generate contextual description
+    const carCount = detectedObjects.filter(obj => obj.type === 'car').length;
+    const bikeCount = detectedObjects.filter(obj => obj.type === 'bike' || obj.type === 'motorcycle').length;
+    const pedestrianCount = detectedObjects.filter(obj => obj.type === 'pedestrian').length;
+    const zebraCrossingCount = detectedObjects.filter(obj => obj.type === 'zebra_crossing').length;
     
-    oscillator.frequency.value = 800;
-    oscillator.type = 'sine';
-    gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1);
+    let description = "Detection complete: ";
+    const detections = [];
     
-    oscillator.start();
-    oscillator.stop(audioContext.currentTime + 1);
+    if (carCount > 0) detections.push(`${carCount} car${carCount > 1 ? 's' : ''}`);
+    if (bikeCount > 0) detections.push(`${bikeCount} bike${bikeCount > 1 ? 's' : ''}`);
+    if (pedestrianCount > 0) detections.push(`${pedestrianCount} pedestrian${pedestrianCount > 1 ? 's' : ''}`);
+    if (zebraCrossingCount > 0) detections.push(`${zebraCrossingCount} zebra crossing${zebraCrossingCount > 1 ? 's' : ''}`);
+    
+    description += detections.join(', ') + ' detected. ';
+    
+    // Add safety guidance
+    if (zebraCrossingCount > 0) {
+      description += "Zebra crossing available for safe passage. ";
+    }
+    if (carCount > 2) {
+      description += "Heavy traffic detected, exercise caution. ";
+    }
+    if (pedestrianCount > 0) {
+      description += "Other pedestrians nearby. ";
+    }
+    
+    const overallConfidence = detectedObjects.reduce((sum, obj) => sum + obj.confidence, 0) / detectedObjects.length;
     
     return {
       processed_video_url: videoUrl,
-      audio_feedback_url: '', // We'll use text-to-speech API in production
-      description_text: randomResult
+      audio_feedback_url: '',
+      description_text: description.trim(),
+      detected_objects: detectedObjects,
+      confidence_score: Math.round(overallConfidence * 100) / 100
     };
+  }, []);
+
+  const speakWithEnhancedVoice = useCallback(async (text: string) => {
+    // Stop any current speech
+    if (speechSynthesis.speaking) {
+      speechSynthesis.cancel();
+    }
+    
+    setIsSpeaking(true);
+    
+    try {
+      // Wait for voices to load
+      await new Promise<void>((resolve) => {
+        if (speechSynthesis.getVoices().length > 0) {
+          resolve();
+        } else {
+          speechSynthesis.addEventListener('voiceschanged', () => resolve(), { once: true });
+        }
+      });
+      
+      const utterance = new SpeechSynthesisUtterance(text);
+      const voices = speechSynthesis.getVoices();
+      
+      // Prefer high-quality English voices
+      const preferredVoices = voices.filter(voice => 
+        voice.lang.startsWith('en') && 
+        (voice.name.includes('Google') || voice.name.includes('Microsoft') || voice.name.includes('Natural'))
+      );
+      
+      if (preferredVoices.length > 0) {
+        utterance.voice = preferredVoices[0];
+      } else if (voices.length > 0) {
+        utterance.voice = voices.find(voice => voice.lang.startsWith('en')) || voices[0];
+      }
+      
+      // Enhanced voice settings for clarity
+      utterance.rate = 0.85;
+      utterance.pitch = 1.1;
+      utterance.volume = 1.0;
+      
+      utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = () => setIsSpeaking(false);
+      
+      speechSynthesis.speak(utterance);
+      
+    } catch (error) {
+      console.error('Speech synthesis error:', error);
+      setIsSpeaking(false);
+    }
   }, []);
 
   const handleSubmit = async () => {
@@ -91,15 +188,13 @@ const VisionMate = () => {
 
     setIsProcessing(true);
     try {
-      const result = await simulateProcessing(selectedFile);
+      const result = await simulateAdvancedDetection(selectedFile);
       setResult(result);
+      setDetectedObjects(result.detected_objects);
       
-      // Speak the result using Web Speech API
+      // Enhanced text-to-speech with better voice
       if ('speechSynthesis' in window) {
-        const utterance = new SpeechSynthesisUtterance(result.description_text);
-        utterance.rate = 0.8;
-        utterance.pitch = 1;
-        speechSynthesis.speak(utterance);
+        await speakWithEnhancedVoice(result.description_text);
       }
       
       toast({
@@ -289,7 +384,7 @@ const VisionMate = () => {
           <Card className="p-8 space-y-6 backdrop-blur-sm bg-card/95 border-primary/20 shadow-lg">
             <h2 className="text-2xl font-semibold text-card-foreground">Results</h2>
             
-            {/* Video Player */}
+            {/* Video Player with Object Detection Overlay */}
             <div className="space-y-4">
               <div className="relative rounded-lg overflow-hidden bg-black/10 min-h-[200px] flex items-center justify-center border border-primary/20">
                 {result?.processed_video_url ? (
@@ -302,6 +397,38 @@ const VisionMate = () => {
                       onPause={() => setIsVideoPlaying(false)}
                       controls
                     />
+                    
+                    {/* Object Detection Bounding Boxes Overlay */}
+                    {detectedObjects.length > 0 && (
+                      <div className="absolute inset-0 pointer-events-none">
+                        {detectedObjects.map((obj) => (
+                          <div
+                            key={obj.id}
+                            className="absolute border-2 border-accent rounded-md"
+                            style={{
+                              left: `${(obj.bbox.x / 640) * 100}%`,
+                              top: `${(obj.bbox.y / 480) * 100}%`,
+                              width: `${(obj.bbox.width / 640) * 100}%`,
+                              height: `${(obj.bbox.height / 480) * 100}%`,
+                              borderColor: obj.type === 'car' ? '#ff4444' : 
+                                         obj.type === 'pedestrian' ? '#44ff44' :
+                                         obj.type === 'zebra_crossing' ? '#4444ff' : '#ffff44'
+                            }}
+                          >
+                            <div 
+                              className="absolute -top-6 left-0 px-1 py-0.5 text-xs font-medium rounded text-white"
+                              style={{
+                                backgroundColor: obj.type === 'car' ? '#ff4444' : 
+                                               obj.type === 'pedestrian' ? '#44ff44' :
+                                               obj.type === 'zebra_crossing' ? '#4444ff' : '#ffff44'
+                              }}
+                            >
+                              {obj.type} ({Math.round(obj.confidence * 100)}%)
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="text-center text-muted-foreground">
@@ -310,52 +437,138 @@ const VisionMate = () => {
                   </div>
                 )}
               </div>
+              
+              {/* Detection Statistics */}
+              {result && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-3 bg-primary/5 rounded-lg border border-primary/10">
+                    <p className="text-sm text-muted-foreground">Objects Detected</p>
+                    <p className="text-xl font-bold text-primary">{detectedObjects.length}</p>
+                  </div>
+                  <div className="p-3 bg-primary/5 rounded-lg border border-primary/10">
+                    <p className="text-sm text-muted-foreground">Avg. Confidence</p>
+                    <p className="text-xl font-bold text-primary">
+                      {result.confidence_score ? Math.round(result.confidence_score * 100) : 0}%
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Audio Feedback */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-medium">Audio Feedback</h3>
-                {result && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={toggleAudioMute}
-                  >
-                    {audioMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                  </Button>
-                )}
+                <div className="flex items-center gap-2">
+                  {isSpeaking && (
+                    <div className="flex items-center gap-1 text-accent">
+                      <div className="w-2 h-2 bg-accent rounded-full animate-pulse"></div>
+                      <span className="text-xs">Speaking...</span>
+                    </div>
+                  )}
+                  {result && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => result && speakWithEnhancedVoice(result.description_text)}
+                      disabled={isSpeaking}
+                    >
+                      <Volume2 className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
               </div>
               
-              <div className="p-4 bg-muted/50 rounded-lg border border-primary/10 min-h-[80px] flex items-center justify-center">
+              <div className="p-4 bg-muted/50 rounded-lg border border-primary/10 min-h-[100px] flex flex-col justify-center">
                 {result ? (
-                  <div className="text-center">
+                  <div className="space-y-3">
                     <div className="flex items-center justify-center mb-2">
                       <Volume2 className="w-5 h-5 text-primary mr-2" />
-                      <span className="text-sm text-muted-foreground">Audio generated via Text-to-Speech</span>
+                      <span className="text-sm text-muted-foreground">Enhanced Text-to-Speech Audio</span>
                     </div>
-                    <audio
-                      ref={audioRef}
-                      controls
-                      className="w-full"
-                      muted={audioMuted}
-                    >
-                      <source src="" type="audio/mpeg" />
-                    </audio>
+                    
+                    {/* Voice Controls */}
+                    <div className="flex justify-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => speakWithEnhancedVoice(result.description_text)}
+                        disabled={isSpeaking}
+                        className="text-xs"
+                      >
+                        {isSpeaking ? 'Speaking...' : 'Play Audio'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => speechSynthesis.cancel()}
+                        disabled={!isSpeaking}
+                        className="text-xs"
+                      >
+                        Stop
+                      </Button>
+                    </div>
+                    
+                    {/* Audio Visualization */}
+                    {isSpeaking && (
+                      <div className="flex justify-center items-center gap-1">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <div
+                            key={i}
+                            className="w-1 bg-accent rounded-full animate-pulse"
+                            style={{
+                              height: Math.random() * 20 + 10 + 'px',
+                              animationDelay: i * 0.1 + 's'
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : (
-                  <p className="text-muted-foreground text-center">Audio feedback will be generated after processing</p>
+                  <p className="text-muted-foreground text-center">High-quality audio feedback will be generated after processing</p>
                 )}
               </div>
             </div>
 
-            {/* Description */}
+            {/* Detection Results */}
             {result?.description_text && (
-              <div className="p-6 bg-gradient-to-r from-primary/10 to-primary/20 rounded-lg border border-primary/30">
-                <h3 className="text-lg font-medium mb-3 text-primary">Detection Result</h3>
-                <p className="text-lg font-medium text-foreground leading-relaxed">
-                  {result.description_text}
-                </p>
+              <div className="space-y-4">
+                <div className="p-6 bg-gradient-to-r from-primary/10 to-primary/20 rounded-lg border border-primary/30">
+                  <h3 className="text-lg font-medium mb-3 text-primary">Detection Summary</h3>
+                  <p className="text-lg font-medium text-foreground leading-relaxed">
+                    {result.description_text}
+                  </p>
+                </div>
+                
+                {/* Detailed Object List */}
+                {detectedObjects.length > 0 && (
+                  <div className="p-4 bg-card/50 rounded-lg border border-primary/20">
+                    <h4 className="font-medium mb-3 text-foreground">Detected Objects:</h4>
+                    <div className="grid grid-cols-1 gap-2">
+                      {detectedObjects.map((obj) => (
+                        <div key={obj.id} className="flex items-center justify-between p-2 bg-muted/30 rounded">
+                          <div className="flex items-center gap-3">
+                            <div 
+                              className="w-3 h-3 rounded-full"
+                              style={{
+                                backgroundColor: obj.type === 'car' ? '#ff4444' : 
+                                               obj.type === 'pedestrian' ? '#44ff44' :
+                                               obj.type === 'zebra_crossing' ? '#4444ff' : 
+                                               obj.type === 'bike' || obj.type === 'motorcycle' ? '#ff8844' : '#ffff44'
+                              }}
+                            />
+                            <span className="font-medium capitalize">{obj.type.replace('_', ' ')}</span>
+                            <span className="text-sm text-muted-foreground">({obj.position})</span>
+                          </div>
+                          <span className="text-sm font-mono bg-primary/10 px-2 py-1 rounded">
+                            {Math.round(obj.confidence * 100)}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </Card>
